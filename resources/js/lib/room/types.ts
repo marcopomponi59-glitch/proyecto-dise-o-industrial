@@ -9,6 +9,8 @@
 
 export type Wall = 'top' | 'right' | 'bottom' | 'left';
 
+export type Outside = 'atardecer' | 'bloques' | 'cielo';
+
 /**
  * Cómo se apoya un objeto: en el piso, colgado de una pared, colgado del techo (su altura
  * desde el piso se calcula sola) o como alfombra (no choca con nada).
@@ -39,6 +41,8 @@ export interface RoomItem {
     color: string;
     /** Sólo para lámparas: si está prendida. */
     lightOn?: boolean;
+    /** Estilo de cuadros, camas y alfombras: `tema:<clave>` o una foto como data URL. */
+    texture?: string;
 }
 
 export interface Room {
@@ -49,6 +53,8 @@ export interface Room {
     height: number;
     wallColor: string;
     floorColor: string;
+    /** Qué se ve por las ventanas: paisaje de bloques al atardecer o de día, o sólo cielo. */
+    outside?: Outside;
     items: RoomItem[];
     updatedAt: string;
 }

@@ -28,6 +28,14 @@ Editor para armar una habitación con las medidas que cargue la persona y amuebl
 - **Avisos**: objetos que chocan, que se salen de la habitación o que superan el techo. Se tiene en
   cuenta la altura: la TV colgada sobre el mueble o la lámpara sobre la mesa de luz no chocan, y las
   alfombras no chocan con nada.
+- **Estilos para cuadros, camas y alfombras**: temas dibujados por código (bloques pixelados, dinosaurios,
+  espacio, arcoíris) o una foto propia, que se achica y queda guardada en el navegador.
+- **Recorrer**: modo en primera persona dentro de la vista 3D (W A S D o flechas, arrastrar para mirar,
+  Esc para salir; en pantallas táctiles hay flechas en pantalla). No atraviesa paredes, sí muebles.
+- **Paisaje por las ventanas**: alrededor de la casa hay un paisaje de bloques al atardecer (cerezos, flores,
+  sol cuadrado, bruma) o de día, o sólo cielo; se elige en las propiedades de la habitación.
+- **Compartir**: arma un link con el diseño comprimido después del `#` (no pasa por el servidor). Quien lo abre
+  recibe una copia en su navegador. Las fotos no viajan en el link; los temas sí.
 - **Guardado** automático en el navegador (`localStorage`), sin cuentas ni base de datos.
   Exportar e importar cada habitación como `.json`.
 - **Deshacer y rehacer**.

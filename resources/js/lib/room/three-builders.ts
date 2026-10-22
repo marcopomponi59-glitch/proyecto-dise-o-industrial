@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { findCatalogEntry, isOpening } from './catalog';
+import { isPhoto, paintTheme, themeOf, type TextureUse } from './textures';
 import type { Room, RoomItem, Wall } from './types';
 
 /** La escena trabaja en metros; el modelo, en centímetros. */
@@ -205,10 +206,9 @@ const builders: Record<RoomItem['shape'], Builder> = {
 
     frame: (w, d, h, color) => {
         const border = Math.min(0.04, w * 0.08, h * 0.08);
-        return [
-            box(w, h, d, material('#3e2723')),
-            box(w - 2 * border, h - 2 * border, 0.004, material(color, { roughness: 0.6 }), 0, border, d / 2 + 0.002),
-        ];
+        const canvas = box(w - 2 * border, h - 2 * border, 0.004, material(color, { roughness: 0.6 }), 0, border, d / 2 + 0.002);
+        canvas.name = 'canvas';
+        return [box(w, h, d, material('#3e2723')), canvas];
     },
 
     plant: (w, d, h, color) => {
@@ -233,7 +233,108 @@ const builders: Record<RoomItem['shape'], Builder> = {
 
 /** Lo que cambia la forma del objeto; si no cambió, alcanza con moverlo. */
 export function itemSignature(item: RoomItem): string {
-    return [item.type, item.shape, item.width, item.depth, item.height, item.color, item.lightOn ? 'on' : 'off'].join('|');
+    // De una foto alcanza con el largo y la punta: compararla entera en cada cambio es caro.
+    const texture = item.texture ? `${item.texture.length}:${item.texture.slice(-48)}` : '';
+    return [item.type, item.shape, item.width, item.depth, item.height, item.color, item.lightOn ? 'on' : 'off', texture].join('|');
+}
+
+const textureCache = new Map<string, THREE.Texture>();
+const textureLoader = new THREE.TextureLoader();
+
+/** Textura de un tema o una foto; se cachea por valor (y por proporción, en los cuadros). */
+function loadTexture(value: string, use: TextureUse, aspect: number): THREE.Texture | null {
+    const theme = themeOf(value);
+    if (!theme && !isPhoto(value)) {
+        return null;
+    }
+    const key = `${use}|${theme ? aspect.toFixed(2) : ''}|${value}`;
+    let texture = textureCache.get(key);
+    if (!texture) {
+        texture = theme ? new THREE.CanvasTexture(paintTheme(theme, use, aspect)) : textureLoader.load(value);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        if (theme === 'bloques') {
+            texture.magFilter = THREE.NearestFilter;
+        }
+        textureCache.set(key, texture);
+    }
+    return texture;
+}
+
+/**
+ * Pone el tema o la foto del objeto: en el lienzo de un cuadro (recortada para llenarlo sin deformarse)
+ * o como estampado en la tela de camas y alfombras.
+ */
+export function applyTexture(group: THREE.Object3D, item: RoomItem) {
+    const use = findCatalogEntry(item.type)?.textured;
+    if (!use || !item.texture) {
+        return;
+    }
+    const aspect = item.width / item.height;
+    const base = loadTexture(item.texture, use, aspect);
+    if (!base) {
+        return;
+    }
+    const texture = base.clone();
+    texture.needsUpdate = true;
+
+    if (use === 'poster') {
+        const canvas = group.getObjectByName('canvas') as THREE.Mesh | undefined;
+        if (!canvas) {
+            return;
+        }
+        const fit = () => {
+            const image = texture.image as { width?: number; height?: number } | undefined;
+            if (!image?.width || !image.height) {
+                return;
+            }
+            const imageAspect = image.width / image.height;
+            texture.repeat.set(Math.min(1, aspect / imageAspect), Math.min(1, imageAspect / aspect));
+            texture.offset.set((1 - texture.repeat.x) / 2, (1 - texture.repeat.y) / 2);
+        };
+        fit();
+        if (isPhoto(item.texture) && !(texture.image as { width?: number } | undefined)?.width) {
+            // La foto todavía está cargando: se recorta cuando llega.
+            (base.image as HTMLImageElement | undefined)?.addEventListener?.('load', () => {
+                texture.image = base.image;
+                fit();
+                texture.needsUpdate = true;
+            });
+        }
+        canvas.material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6 });
+        return;
+    }
+
+    // Los modelos traen UV pensadas para una paleta de colores, no para una imagen: en vez de pintar
+    // su tela, se le pone encima una funda fina con UV propias que cubre la parte de arriba de la tela.
+    group.updateMatrixWorld(true);
+    const toGroup = group.matrixWorld.clone().invert();
+    const box = new THREE.Box3();
+    group.traverse((child) => {
+        if (!(child instanceof THREE.Mesh) || child.name === 'fabric-cover') {
+            return;
+        }
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        if (mats.some((m) => m.userData.fabric)) {
+            child.geometry.computeBoundingBox();
+            box.union(child.geometry.boundingBox!.clone().applyMatrix4(child.matrixWorld).applyMatrix4(toGroup));
+        }
+    });
+    if (box.isEmpty()) {
+        return;
+    }
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    // Un estampado cada ~60 cm, según lo que mida la tela.
+    texture.repeat.set(Math.max(1, size.x / 0.6), Math.max(1, size.z / 0.6));
+    const cover = new THREE.Mesh(
+        new THREE.BoxGeometry(size.x + 0.01, 0.006, size.z + 0.01),
+        new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9 }),
+    );
+    cover.name = 'fabric-cover';
+    cover.position.set(center.x, box.max.y + 0.003, center.z);
+    cover.receiveShadow = true;
+    group.add(cover);
 }
 
 /**
@@ -396,6 +497,14 @@ export function buildShell(room: Room): RoomShell {
     const floor = box(W, 0.02, L, material(room.floorColor, { roughness: 0.9 }), W / 2, -0.02, L / 2);
     floor.receiveShadow = true;
     group.add(floor);
+
+    // Techo mirando hacia abajo: se ve desde adentro (recorrido) y desde arriba queda invisible,
+    // porque la cara de atrás no se dibuja. No hace sombra para no tapar la luz del día.
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, L), new THREE.MeshStandardMaterial({ color: '#fafafa', roughness: 1 }));
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(W / 2, H, L / 2);
+    ceiling.receiveShadow = true;
+    group.add(ceiling);
 
     // Las paredes superior e inferior corren a lo largo de X (y tapan las esquinas); las laterales, a lo largo de Z.
     const specs: { wall: Wall; from: number; to: number; place: (mesh: THREE.Mesh) => void }[] = [

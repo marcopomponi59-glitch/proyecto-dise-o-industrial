@@ -6,11 +6,12 @@ import PropertiesPanel from '@/components/room/PropertiesPanel.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useRoomEditor, type ViewMode } from '@/composables/useRoomEditor';
+import { decodeRoomFromLink, encodeRoomForLink, hasPhotos } from '@/lib/room/share';
 import { parseRoomFile, type NewRoomData } from '@/lib/room/storage';
 import { Head } from '@inertiajs/vue3';
 import { useEventListener } from '@vueuse/core';
-import { AlertTriangle, Download, Plus, Redo2, Trash2, Undo2, Upload, X } from 'lucide-vue-next';
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { AlertTriangle, Check, Copy, Download, Info, Plus, Redo2, Share2, Trash2, Undo2, Upload, X } from 'lucide-vue-next';
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 
 // Three.js pesa: se descarga recién cuando se muestra la vista 3D.
 const Room3D = defineAsyncComponent(() => import('@/components/room/Room3D.vue'));
@@ -21,6 +22,9 @@ const { rooms, room, activeId, selectedId, issues, saveFailed, snapStep, viewMod
 const showNewRoom = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const errorMessage = ref<string | null>(null);
+const notice = ref<string | null>(null);
+const shareLink = ref<string | null>(null);
+const copied = ref(false);
 
 const views: { value: ViewMode; label: string }[] = [
     { value: '2d', label: '2D' },
@@ -55,6 +59,49 @@ async function importFile(event: Event) {
         errorMessage.value = error instanceof Error ? error.message : 'No se pudo importar el archivo.';
     }
 }
+
+async function openShare() {
+    if (!room.value) {
+        return;
+    }
+    copied.value = false;
+    const fragment = await encodeRoomForLink(room.value);
+    shareLink.value = `${window.location.origin}${window.location.pathname}#${fragment}`;
+}
+
+async function copyShareLink(input: HTMLInputElement | null) {
+    if (!shareLink.value) {
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(shareLink.value);
+        copied.value = true;
+    } catch {
+        // Sin acceso al portapapeles (sitio sin https): se deja el link seleccionado para copiarlo a mano.
+        input?.select();
+    }
+}
+
+/** Si la página se abrió con un link compartido, guarda una copia del diseño y limpia el link. */
+onMounted(async () => {
+    try {
+        const shared = await decodeRoomFromLink(window.location.hash);
+        if (!shared) {
+            return;
+        }
+        const result = editor.openSharedRoom(shared);
+        notice.value =
+            result === 'added'
+                ? `Te compartieron "${shared.name}". Se guardó una copia en este navegador: los cambios que hagas no le llegan a quien te la mandó.`
+                : `"${shared.name}" ya estaba guardada en este navegador; se abrió la que tenías.`;
+    } catch (error) {
+        errorMessage.value = error instanceof Error ? error.message : 'No se pudo abrir el diseño compartido.';
+    } finally {
+        if (window.location.hash) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+    }
+});
 
 function isTyping(target: EventTarget | null): boolean {
     return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName));
@@ -128,6 +175,9 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
                 <Button variant="outline" size="sm" title="Descargar este diseño como archivo" @click="editor.downloadActiveRoom()"
                     ><Download /> Exportar</Button
                 >
+                <Button variant="outline" size="sm" title="Armar un link para mandarle este diseño a otra persona" @click="openShare"
+                    ><Share2 /> Compartir</Button
+                >
                 <Button variant="ghost" size="sm" title="Eliminar esta habitación" @click="confirmDelete"><Trash2 /></Button>
 
                 <div class="mx-1 h-6 w-px bg-neutral-200 dark:bg-neutral-700" />
@@ -167,6 +217,16 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
             <input ref="fileInput" type="file" accept="application/json,.json" class="hidden" @change="importFile" />
         </header>
 
+        <div
+            v-if="notice"
+            class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200"
+        >
+            <Info class="h-4 w-4 shrink-0" />
+            <span class="flex-1">{{ notice }}</span>
+            <button type="button" class="rounded p-0.5 hover:bg-blue-100 dark:hover:bg-blue-900" title="Cerrar" @click="notice = null">
+                <X class="h-4 w-4" />
+            </button>
+        </div>
         <div
             v-if="errorMessage || saveFailed"
             class="flex items-center gap-2 border-b border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
@@ -244,6 +304,39 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
                 </p>
             </aside>
         </div>
+
+        <Dialog :open="shareLink !== null" @update:open="(open: boolean) => !open && (shareLink = null)">
+            <DialogContent class="max-w-lg">
+                <DialogHeader>
+                    <DialogTitle>Compartir "{{ room?.name }}"</DialogTitle>
+                    <DialogDescription>
+                        Quien abra este link recibe una copia del diseño tal como está ahora. Si después cambiás algo, volvé a compartirlo.
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="flex gap-2">
+                    <input
+                        ref="shareInput"
+                        :value="shareLink ?? ''"
+                        readonly
+                        aria-label="Link para compartir"
+                        class="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-xs"
+                        @focus="($event.target as HTMLInputElement).select()"
+                    />
+                    <Button type="button" @click="copyShareLink($refs.shareInput as HTMLInputElement)">
+                        <Check v-if="copied" />
+                        <Copy v-else />
+                        {{ copied ? 'Copiado' : 'Copiar' }}
+                    </Button>
+                </div>
+                <p v-if="room && hasPhotos(room)" class="text-xs text-amber-600">
+                    Las fotos que subiste no viajan en el link (pesan demasiado): quien lo abra ve esos objetos lisos. Los temas sí viajan.
+                </p>
+                <p class="text-xs text-neutral-500">
+                    El diseño viaja dentro del link: no se sube a ningún servidor. Para que otra persona pueda abrirlo, la aplicación tiene que estar
+                    publicada en una dirección a la que esa persona llegue.
+                </p>
+            </DialogContent>
+        </Dialog>
 
         <Dialog v-model:open="showNewRoom">
             <DialogContent class="max-w-md">

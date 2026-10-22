@@ -53,6 +53,8 @@ export async function buildModel(entry: CatalogEntry, size: THREE.Vector3, color
             const copy = m.clone() as THREE.MeshStandardMaterial;
             if (tint.has(copy.name)) {
                 copy.color.set(color);
+                // La parte pintable es también la que lleva el estampado (tema o foto).
+                copy.userData.fabric = true;
             }
             if (copy.name === 'lamp') {
                 copy.userData.lampShade = true;

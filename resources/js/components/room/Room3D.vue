@@ -2,8 +2,10 @@
 import { useRoomEditor } from '@/composables/useRoomEditor';
 import { findCatalogEntry } from '@/lib/room/catalog';
 import { formatCm } from '@/lib/room/format';
+import { buildLandscape, disposeLandscape, LANDSCAPE_STYLES, type LandscapeStyle } from '@/lib/room/landscape';
 import { buildModel } from '@/lib/room/models';
 import {
+    applyTexture,
     buildItem,
     buildShell,
     disposeObject,
@@ -18,7 +20,28 @@ import {
     type RoomShell,
 } from '@/lib/room/three-builders';
 import type { Room } from '@/lib/room/types';
-import { ArrowDown, ArrowUp, Box, Copy, Eye, Lightbulb, LightbulbOff, Moon, RotateCcw, RotateCw, Sun, Trash2 } from 'lucide-vue-next';
+import { WALK_KEYS, WalkControls, type WalkKey } from '@/lib/room/walk';
+import { useEventListener } from '@vueuse/core';
+import {
+    ArrowDown,
+    ArrowUp,
+    Box,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    ChevronUp,
+    Copy,
+    Eye,
+    Footprints,
+    Lightbulb,
+    LightbulbOff,
+    LogOut,
+    Moon,
+    RotateCcw,
+    RotateCw,
+    Sun,
+    Trash2,
+} from 'lucide-vue-next';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -32,6 +55,8 @@ const { selectedId, selectedItem, issues, selectItem, beginMove, moveItemTo, set
 const toolbar = ref<{ x: number; y: number } | null>(null);
 const toolbarEl = ref<HTMLDivElement | null>(null);
 const selected = computed(() => selectedItem.value);
+const padButton =
+    'flex h-10 w-10 touch-none select-none items-center justify-center rounded-md bg-white/85 text-neutral-700 shadow active:bg-white dark:bg-neutral-800/85 dark:text-neutral-200';
 const toolButton = 'rounded p-1 hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-700';
 
 const container = ref<HTMLDivElement | null>(null);
@@ -85,6 +110,7 @@ function syncItems() {
             entry = { group: buildItem(item), signature };
             itemObjects.set(item.id, entry);
             itemsRoot.add(entry.group);
+            applyTexture(entry.group, item);
             loadModelFor(item, entry.group);
         }
         placeItem(entry.group, item);
@@ -112,6 +138,7 @@ function loadModelFor(item: Room['items'][number], group: THREE.Group) {
         .then((model) => {
             if (renderer && itemObjects.get(item.id)?.group === group) {
                 swapInModel(group, model, item);
+                applyTexture(group, item);
             }
         })
         .catch(() => {
@@ -120,13 +147,108 @@ function loadModelFor(item: Room['items'][number], group: THREE.Group) {
 }
 
 const night = ref(false);
+
+// --- Recorrido en primera persona ---
+const walking = ref(false);
+let walker: WalkControls;
+let looking: { x: number; y: number } | null = null;
+let fast = false;
+let lastFrame = performance.now();
+
+function enterWalk() {
+    selectItem(null);
+    walking.value = true;
+    controls.enabled = false;
+    walker.enter(props.room);
+}
+
+function exitWalk() {
+    walker.exit();
+    walking.value = false;
+    controls.enabled = true;
+    controls.update();
+}
+
+function pressKey(key: WalkKey, down: boolean) {
+    if (down) {
+        walker.pressed.add(key);
+    } else {
+        walker.pressed.delete(key);
+    }
+}
+
+// En captura, para ganarle al atajo del editor que mueve el objeto seleccionado con las flechas.
+useEventListener(
+    window,
+    'keydown',
+    (event: KeyboardEvent) => {
+        if (!walking.value) {
+            return;
+        }
+        fast = event.shiftKey;
+        const key = WALK_KEYS[event.key.toLowerCase()];
+        if (key || event.key === 'Escape') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+        if (event.key === 'Escape') {
+            exitWalk();
+        } else if (key) {
+            pressKey(key, true);
+        }
+    },
+    { capture: true },
+);
+useEventListener(window, 'keyup', (event: KeyboardEvent) => {
+    fast = event.shiftKey;
+    const key = WALK_KEYS[event.key.toLowerCase()];
+    if (walking.value && key) {
+        pressKey(key, false);
+    }
+});
+useEventListener(window, 'blur', () => walker?.pressed.clear());
 let hemisphere: THREE.HemisphereLight;
 let sun: THREE.DirectionalLight;
 
 function applyDaylight() {
+    const style = landscapeStyle ? LANDSCAPE_STYLES[landscapeStyle] : null;
     hemisphere.intensity = night.value ? 0.12 : 1.6;
+    hemisphere.color.set(style?.hemisphere ?? '#ffffff');
     sun.intensity = night.value ? 0 : 1.8;
-    renderer?.setClearColor(night.value ? '#0b1020' : '#000000', night.value ? 1 : 0);
+    sun.color.set(style?.sunLight ?? '#ffffff');
+    // De noche se esconde el cielo pintado y se apaga la bruma; sin paisaje queda el degradé del panel.
+    const sky = landscape?.getObjectByName('sky');
+    const sunDisc = landscape?.getObjectByName('sun');
+    if (sky) sky.visible = !night.value;
+    if (sunDisc) sunDisc.visible = !night.value;
+    scene.fog = style && !night.value ? new THREE.Fog(style.fog, 16, 55) : null;
+    renderer?.setClearColor('#0b1020', night.value ? 1 : 0);
+}
+
+let landscape: THREE.Group | null = null;
+let landscapeStyle: LandscapeStyle | null = null;
+let landscapeSignature = '';
+
+/** Paisaje de bloques alrededor de la casa; se rearma sólo si cambia el tamaño o el estilo. */
+function syncLandscape() {
+    const outside = props.room.outside ?? 'atardecer';
+    const style: LandscapeStyle | null = outside === 'atardecer' ? 'atardecer' : outside === 'bloques' ? 'dia' : null;
+    const signature = style ? `${style}:${props.room.width}x${props.room.length}` : '';
+    if (signature === landscapeSignature) {
+        return;
+    }
+    if (landscape) {
+        scene.remove(landscape);
+        disposeLandscape(landscape);
+        landscape = null;
+    }
+    if (style) {
+        landscape = buildLandscape(props.room, style);
+        scene.add(landscape);
+    }
+    landscapeStyle = style;
+    landscapeSignature = signature;
+    applyDaylight();
 }
 
 watch(night, () => {
@@ -171,7 +293,7 @@ function updateWalls() {
 
 /** Ubica la barra flotante arriba del objeto seleccionado. */
 function updateToolbar() {
-    const item = selected.value;
+    const item = walking.value ? null : selected.value;
     const el = container.value;
     if (!item || !el) {
         toolbar.value = null;
@@ -194,7 +316,13 @@ function updateToolbar() {
 
 function render() {
     frame = requestAnimationFrame(render);
-    controls.update();
+    const now = performance.now();
+    if (walking.value) {
+        walker.update((now - lastFrame) / 1000, props.room, fast);
+    } else {
+        controls.update();
+    }
+    lastFrame = now;
     updateWalls();
     updateToolbar();
     renderer?.render(scene, camera);
@@ -230,6 +358,11 @@ function onPointerDown(event: PointerEvent) {
     if (event.button !== 0) {
         return;
     }
+    if (walking.value) {
+        looking = { x: event.clientX, y: event.clientY };
+        capturePointer(renderer!.domElement, event.pointerId);
+        return;
+    }
     setPointer(event);
     const hit = raycaster.intersectObject(itemsRoot, true).find((h) => h.object.name !== 'outline');
     const id = hit ? itemIdOf(hit.object) : null;
@@ -257,6 +390,11 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
+    if (looking) {
+        walker.look(event.clientX - looking.x, event.clientY - looking.y);
+        looking = { x: event.clientX, y: event.clientY };
+        return;
+    }
     if (!dragging) {
         return;
     }
@@ -272,6 +410,13 @@ function onPointerMove(event: PointerEvent) {
 }
 
 function onPointerUp(event: PointerEvent) {
+    if (looking) {
+        looking = null;
+        if (renderer?.domElement.hasPointerCapture(event.pointerId)) {
+            renderer.domElement.releasePointerCapture(event.pointerId);
+        }
+        return;
+    }
     if (pressed && !pressed.id && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 4) {
         selectItem(null);
     }
@@ -302,6 +447,7 @@ onMounted(() => {
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointercancel', onPointerUp);
     controls = new OrbitControls(camera, renderer.domElement);
+    walker = new WalkControls(camera);
     controls.enableDamping = true;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
     controls.minDistance = 0.5;
@@ -331,6 +477,7 @@ onMounted(() => {
 
     syncShell();
     syncItems();
+    syncLandscape();
     placeSun();
     applyDaylight();
     resetCamera();
@@ -359,7 +506,12 @@ onMounted(() => {
     );
     watch(
         () => props.room.id,
-        () => resetCamera(),
+        () => {
+            if (walking.value) {
+                exitWalk();
+            }
+            resetCamera();
+        },
     );
 
     render();
@@ -371,6 +523,7 @@ watch(
         if (renderer) {
             syncShell();
             syncItems();
+            syncLandscape();
         }
     },
     { deep: true },
@@ -393,6 +546,9 @@ onBeforeUnmount(() => {
     itemsRoot.clear();
     if (shell) {
         disposeObject(shell.group);
+    }
+    if (landscape) {
+        disposeLandscape(landscape);
     }
     disposeSharedMaterials();
     renderer?.dispose();
@@ -458,6 +614,24 @@ onBeforeUnmount(() => {
         </div>
         <div class="absolute right-2 top-2 flex gap-1">
             <button
+                v-if="!walking"
+                type="button"
+                class="inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
+                title="Caminar por la habitación a la altura de los ojos"
+                @click="enterWalk"
+            >
+                <Footprints class="h-3.5 w-3.5" /> Recorrer
+            </button>
+            <button
+                v-else
+                type="button"
+                class="inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
+                title="Salir del recorrido (Esc)"
+                @click="exitWalk"
+            >
+                <LogOut class="h-3.5 w-3.5" /> Salir
+            </button>
+            <button
                 type="button"
                 class="inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
                 :title="night ? 'Ver con luz de día' : 'Ver de noche, sólo con las lámparas'"
@@ -469,6 +643,7 @@ onBeforeUnmount(() => {
                 {{ night ? 'Día' : 'Noche' }}
             </button>
             <button
+                v-if="!walking"
                 type="button"
                 class="inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
                 title="Volver a la vista inicial"
@@ -477,6 +652,7 @@ onBeforeUnmount(() => {
                 <RotateCcw class="h-3.5 w-3.5" /> Centrar
             </button>
             <button
+                v-if="!walking"
                 type="button"
                 class="inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
                 title="Ver desde arriba"
@@ -485,7 +661,59 @@ onBeforeUnmount(() => {
                 <Eye class="h-3.5 w-3.5" /> Desde arriba
             </button>
         </div>
+        <!-- Flechas en pantalla para caminar sin teclado (celular, tablet) -->
+        <div v-if="walking" class="absolute bottom-3 right-3 grid grid-cols-3 gap-1" @pointerdown.stop>
+            <span />
+            <button
+                type="button"
+                :class="padButton"
+                aria-label="Avanzar"
+                @pointerdown="pressKey('forward', true)"
+                @pointerup="pressKey('forward', false)"
+                @pointerleave="pressKey('forward', false)"
+            >
+                <ChevronUp class="h-5 w-5" />
+            </button>
+            <span />
+            <button
+                type="button"
+                :class="padButton"
+                aria-label="Izquierda"
+                @pointerdown="pressKey('left', true)"
+                @pointerup="pressKey('left', false)"
+                @pointerleave="pressKey('left', false)"
+            >
+                <ChevronLeft class="h-5 w-5" />
+            </button>
+            <button
+                type="button"
+                :class="padButton"
+                aria-label="Retroceder"
+                @pointerdown="pressKey('back', true)"
+                @pointerup="pressKey('back', false)"
+                @pointerleave="pressKey('back', false)"
+            >
+                <ChevronDown class="h-5 w-5" />
+            </button>
+            <button
+                type="button"
+                :class="padButton"
+                aria-label="Derecha"
+                @pointerdown="pressKey('right', true)"
+                @pointerup="pressKey('right', false)"
+                @pointerleave="pressKey('right', false)"
+            >
+                <ChevronRight class="h-5 w-5" />
+            </button>
+        </div>
         <p
+            v-if="walking"
+            class="pointer-events-none absolute bottom-2 left-2 hidden items-center gap-1 rounded bg-white/80 px-2 py-1 text-[11px] text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-300 sm:flex"
+        >
+            <Footprints class="h-3 w-3" /> W A S D o flechas para caminar (Shift: más rápido), arrastrá para mirar, Esc para salir.
+        </p>
+        <p
+            v-else
             class="pointer-events-none absolute bottom-2 left-2 hidden items-center gap-1 rounded bg-white/80 px-2 py-1 text-[11px] text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-300 sm:flex"
         >
             <Box class="h-3 w-3" /> Arrastrá el fondo para girar, la rueda para acercar, un objeto para moverlo y Shift + arrastrar para subirlo o

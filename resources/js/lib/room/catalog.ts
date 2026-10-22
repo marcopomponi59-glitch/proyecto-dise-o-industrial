@@ -1,3 +1,4 @@
+import type { TextureUse } from './textures';
 import type { Mount, Shape } from './types';
 
 export interface CatalogEntry {
@@ -21,6 +22,8 @@ export interface CatalogEntry {
     tint?: string[];
     /** Da luz en la vista 3D y se puede prender y apagar. */
     light?: boolean;
+    /** Acepta un tema o una foto: como imagen única (cuadros) o como estampado (camas, alfombras). */
+    textured?: TextureUse;
 }
 
 export type CatalogCategory = 'Dormitorio' | 'Living' | 'Comedor' | 'Escritorio' | 'Guardado' | 'Aberturas' | 'Pared' | 'Iluminación' | 'Decoración';
@@ -106,6 +109,7 @@ export const CATALOG: CatalogEntry[] = [
 
     {
         type: 'cama-doble',
+        textured: 'fabric',
         name: 'Cama doble',
         category: 'Dormitorio',
         shape: 'bed',
@@ -120,6 +124,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'cama-simple',
+        textured: 'fabric',
         name: 'Cama simple',
         category: 'Dormitorio',
         shape: 'bed',
@@ -134,6 +139,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'cucheta',
+        textured: 'fabric',
         name: 'Cucheta',
         category: 'Dormitorio',
         shape: 'bed',
@@ -690,6 +696,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'cuadro',
+        textured: 'poster',
         name: 'Cuadro',
         category: 'Pared',
         shape: 'frame',
@@ -702,6 +709,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'cuadro-grande',
+        textured: 'poster',
         name: 'Cuadro grande',
         category: 'Pared',
         shape: 'frame',
@@ -862,6 +870,7 @@ export const CATALOG: CatalogEntry[] = [
 
     {
         type: 'alfombra',
+        textured: 'fabric',
         name: 'Alfombra',
         category: 'Decoración',
         shape: 'rug',
@@ -876,6 +885,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'alfombra-redondeada',
+        textured: 'fabric',
         name: 'Alfombra redondeada',
         category: 'Decoración',
         shape: 'rug',
@@ -890,6 +900,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'alfombra-redonda',
+        textured: 'fabric',
         name: 'Alfombra redonda',
         category: 'Decoración',
         shape: 'rug',
@@ -904,6 +915,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     {
         type: 'alfombra-cuadrada',
+        textured: 'fabric',
         name: 'Alfombra cuadrada',
         category: 'Decoración',
         shape: 'rug',

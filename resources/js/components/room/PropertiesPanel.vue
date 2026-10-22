@@ -4,10 +4,11 @@ import { useRoomEditor } from '@/composables/useRoomEditor';
 import { findCatalogEntry, isOpening } from '@/lib/room/catalog';
 import { formatMeters } from '@/lib/room/format';
 import { WALL_LABEL } from '@/lib/room/geometry';
-import type { Wall } from '@/lib/room/types';
+import type { Outside, Wall } from '@/lib/room/types';
 import { AlertTriangle, Copy, Lightbulb, RotateCcw, RotateCw, Trash2, X } from 'lucide-vue-next';
 import { computed } from 'vue';
 import NumberField from './NumberField.vue';
+import TexturePicker from './TexturePicker.vue';
 
 const { room, selectedItem: item, issues, updateRoom, updateItem, rotateItem, duplicateItem, removeItem, selectItem } = useRoomEditor();
 
@@ -160,6 +161,8 @@ const inputClass =
                 <Lightbulb class="h-4 w-4 text-amber-500" /> Luz encendida
             </label>
 
+            <TexturePicker v-if="entry?.textured" :value="item.texture" :use="entry.textured" @change="updateItem(item.id, { texture: $event })" />
+
             <div v-if="canColor" class="space-y-1">
                 <label for="color-objeto" class="text-xs font-medium text-neutral-600 dark:text-neutral-400">Color</label>
                 <input
@@ -224,6 +227,19 @@ const inputClass =
                     :max="600"
                     @update:model-value="updateRoom({ height: $event })"
                 />
+            </div>
+            <div class="space-y-1">
+                <label for="vista-ventanas" class="text-xs font-medium text-neutral-600 dark:text-neutral-400">Por las ventanas se ve</label>
+                <select
+                    id="vista-ventanas"
+                    :value="room.outside ?? 'atardecer'"
+                    :class="inputClass"
+                    @change="updateRoom({ outside: ($event.target as HTMLSelectElement).value as Outside })"
+                >
+                    <option value="atardecer">Atardecer de bloques</option>
+                    <option value="bloques">Día de bloques</option>
+                    <option value="cielo">Sólo cielo</option>
+                </select>
             </div>
             <p class="text-xs text-neutral-500">
                 Superficie: {{ ((room.width * room.length) / 10000).toLocaleString('es-AR', { maximumFractionDigits: 2 }) }} m²

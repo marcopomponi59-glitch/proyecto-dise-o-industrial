@@ -1,7 +1,8 @@
 import type { CatalogEntry } from './catalog';
 import { CATALOG, findCatalogEntry } from './catalog';
 import { clampToRoom, fitToRoom, placeOnWall } from './geometry';
-import type { Mount, Room, RoomItem, Shape, Wall } from './types';
+import { isPhoto, themeOf } from './textures';
+import type { Mount, Outside, Room, RoomItem, Shape, Wall } from './types';
 
 export const STORAGE_KEY = 'diseno-habitaciones.v1';
 export const FILE_FORMAT = 'diseno-habitacion';
@@ -41,6 +42,7 @@ export function createRoom(data: NewRoomData): Room {
         height: data.height,
         wallColor: '#f5f1ea',
         floorColor: '#c8a27a',
+        outside: 'atardecer',
         items: [],
         updatedAt: new Date().toISOString(),
     };
@@ -133,6 +135,9 @@ function normalizeItem(raw: unknown, room: Room): RoomItem | null {
     if (mount === 'wall') {
         item.wall = oneOf(raw.wall, WALLS, 'top');
     }
+    if (typeof raw.texture === 'string' && (themeOf(raw.texture) || isPhoto(raw.texture))) {
+        item.texture = raw.texture;
+    }
     if (typeof raw.lightOn === 'boolean') {
         item.lightOn = raw.lightOn;
     } else if (entry?.light) {
@@ -156,6 +161,7 @@ export function normalizeRoom(raw: unknown): Room {
         height: number(raw.height, 0, 1),
         wallColor: color(raw.wallColor, '#f5f1ea'),
         floorColor: color(raw.floorColor, '#c8a27a'),
+        outside: oneOf<Outside>(raw.outside, ['atardecer', 'bloques', 'cielo'], 'atardecer'),
         items: [],
         updatedAt: text(raw.updatedAt, new Date().toISOString()),
     };

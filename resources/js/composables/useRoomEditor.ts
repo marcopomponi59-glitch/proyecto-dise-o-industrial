@@ -148,7 +148,7 @@ function selectRoom(id: string) {
     resetHistory();
 }
 
-function updateRoom(patch: Partial<Pick<Room, 'name' | 'width' | 'length' | 'height' | 'wallColor' | 'floorColor'>>) {
+function updateRoom(patch: Partial<Pick<Room, 'name' | 'width' | 'length' | 'height' | 'wallColor' | 'floorColor' | 'outside'>>) {
     const current = room.value;
     if (!current) {
         return;
@@ -176,6 +176,21 @@ function importRoom(raw: Room) {
     }
     rooms.value.push(imported);
     selectRoom(imported.id);
+}
+
+/**
+ * Abre un diseño recibido por link. Si ya está en este navegador (mismo id) se abre el que hay,
+ * para no duplicarlo cada vez que se abre el link; si no, se guarda una copia.
+ */
+function openSharedRoom(raw: Room): 'existing' | 'added' {
+    const shared = normalizeRoom(raw);
+    if (rooms.value.some((r) => r.id === shared.id)) {
+        selectRoom(shared.id);
+        return 'existing';
+    }
+    rooms.value.push(shared);
+    selectRoom(shared.id);
+    return 'added';
 }
 
 function downloadActiveRoom() {
@@ -316,6 +331,7 @@ export function useRoomEditor() {
         updateRoom,
         deleteRoom,
         importRoom,
+        openSharedRoom,
         downloadActiveRoom,
         addItem,
         updateItem,
