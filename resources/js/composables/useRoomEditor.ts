@@ -1,7 +1,10 @@
 import { findCatalogEntry } from '@/lib/room/catalog';
 import { findFreeSpot, findIssues, fitToRoom, moveItem, normalizeRotation } from '@/lib/room/geometry';
+import { addBlock, addItem as addItemToInventory, addSlot, defaultInventory, takeOne, type Slot } from '@/lib/room/inventory';
+import { craft, RECIPES } from '@/lib/room/recipes';
 import { addStarterItems, createItem, createRoom, exportRoom, loadState, normalizeRoom, saveState, uid, type NewRoomData } from '@/lib/room/storage';
-import type { Point, Room, RoomItem } from '@/lib/room/types';
+import type { Point, Room, RoomItem, RoomWorld } from '@/lib/room/types';
+import type { BlockKind } from '@/lib/room/world';
 import { computed, ref, watch } from 'vue';
 
 export type ViewMode = '2d' | '3d' | 'split';
@@ -208,6 +211,140 @@ function downloadActiveRoom() {
 
 // --- Objetos ---
 
+// --- Recorrido: mundo de bloques e inventario (todo se puede deshacer) ---
+
+const inventory = computed<Slot[]>(() => room.value?.world?.inventory ?? defaultInventory());
+
+function worldOf(current: Room): RoomWorld {
+    current.world ??= { broken: [] };
+    current.world.inventory ??= defaultInventory();
+    return current.world;
+}
+
+/**
+ * Rompe un bloque y lo guarda en el inventario. Devuelve false si el inventario estaba lleno:
+ * el bloque se rompe igual y la vista lo deja tirado en el piso.
+ */
+function breakBlock(key: string, kind: BlockKind): boolean {
+    if (!room.value) {
+        return false;
+    }
+    checkpoint();
+    const world = worldOf(room.value);
+    world.placed = (world.placed ?? []).filter(([k]) => k !== key);
+    if (!world.broken.includes(key)) {
+        world.broken = [...world.broken, key];
+    }
+    const next = addBlock(world.inventory!, kind);
+    if (next) {
+        world.inventory = next;
+    }
+    return next !== null;
+}
+
+/** Pone un bloque del lugar `slot` del inventario en la celda `key`. */
+function placeBlock(key: string, slot: number): BlockKind | null {
+    if (!room.value) {
+        return null;
+    }
+    const world = worldOf(room.value);
+    const current = world.inventory![slot];
+    if (current?.kind !== 'block') {
+        return null;
+    }
+    checkpoint();
+    world.inventory = takeOne(world.inventory!, slot)!.inventory;
+    world.placed = [...(world.placed ?? []).filter(([k]) => k !== key), [key, current.block]];
+    return current.block;
+}
+
+/** Guarda un mueble en el inventario (lo saca de la habitación). False si no había lugar. */
+function pocketItem(id: string): boolean {
+    const item = findItem(id);
+    if (!room.value || !item) {
+        return false;
+    }
+    const next = addItemToInventory(worldOf(room.value).inventory!, item);
+    if (!next) {
+        return false;
+    }
+    checkpoint();
+    room.value.world!.inventory = next;
+    room.value.items = room.value.items.filter((i) => i.id !== id);
+    if (selectedId.value === id) {
+        selectedId.value = null;
+    }
+    return true;
+}
+
+/** Pone el mueble del lugar `slot` del inventario en un punto del plano (cm). */
+function placeItemFromInventory(slot: number, point: Point): string | null {
+    if (!room.value) {
+        return null;
+    }
+    const world = worldOf(room.value);
+    const current = world.inventory![slot];
+    if (current?.kind !== 'item') {
+        return null;
+    }
+    checkpoint();
+    world.inventory = takeOne(world.inventory!, slot)!.inventory;
+    const id = room.value.items.some((i) => i.id === current.item.id) ? uid() : current.item.id;
+    const placed = fitToRoom(moveItem({ ...current.item, id }, room.value, point), room.value);
+    room.value.items.push(placed);
+    return id;
+}
+
+/** Saca una unidad del inventario para tirarla al piso. */
+function takeFromInventory(slot: number): Exclude<Slot, null> | null {
+    if (!room.value) {
+        return null;
+    }
+    const world = worldOf(room.value);
+    const result = takeOne(world.inventory!, slot);
+    if (!result) {
+        return null;
+    }
+    checkpoint();
+    world.inventory = result.inventory;
+    return result.taken;
+}
+
+/** Fabrica una receta con lo que hay en el inventario. False si faltan materiales o lo fabricado no entra. */
+function craftRecipe(id: string): boolean {
+    const recipe = RECIPES.find((r) => r.id === id);
+    if (!room.value || !recipe) {
+        return false;
+    }
+    const current = room.value;
+    const world = worldOf(current);
+    const next = craft(world.inventory!, recipe, (type) => {
+        const entry = findCatalogEntry(type);
+        return entry ? createItem(entry, current) : null;
+    });
+    if (!next) {
+        return false;
+    }
+    checkpoint();
+    world.inventory = next;
+    return true;
+}
+
+/** Vuelve a meter en el inventario algo que estaba tirado. False si no hay lugar. */
+function giveToInventory(slot: Exclude<Slot, null>): boolean {
+    if (!room.value) {
+        return false;
+    }
+    const world = worldOf(room.value);
+    const next = addSlot(world.inventory!, slot);
+    if (!next) {
+        return false;
+    }
+    checkpoint();
+    world.inventory = next;
+    return true;
+}
+
 function addItem(type: string) {
     const entry = findCatalogEntry(type);
     if (!room.value || !entry) {
@@ -334,6 +471,14 @@ export function useRoomEditor() {
         openSharedRoom,
         downloadActiveRoom,
         addItem,
+        inventory,
+        breakBlock,
+        placeBlock,
+        pocketItem,
+        placeItemFromInventory,
+        takeFromInventory,
+        giveToInventory,
+        craftRecipe,
         updateItem,
         beginMove,
         moveItemTo,

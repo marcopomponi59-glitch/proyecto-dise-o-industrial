@@ -427,13 +427,14 @@ export function placeItem(group: THREE.Object3D, item: RoomItem) {
     group.rotation.set(0, (-item.rotation * Math.PI) / 180, 0);
 }
 
-export function setOutline(group: THREE.Object3D, state: 'none' | 'selected' | 'issue' | 'selected-issue') {
+export function setOutline(group: THREE.Object3D, state: 'none' | 'selected' | 'issue' | 'selected-issue' | 'target') {
     const outline = group.getObjectByName('outline') as THREE.LineSegments | undefined;
     if (!outline) {
         return;
     }
     outline.visible = state !== 'none';
-    (outline.material as THREE.LineBasicMaterial).color.set(state === 'selected' ? '#2563eb' : '#dc2626');
+    // Lo que está en la mira del recorrido se marca en blanco, como el contorno de un bloque.
+    (outline.material as THREE.LineBasicMaterial).color.set(state === 'target' ? '#ffffff' : state === 'selected' ? '#2563eb' : '#dc2626');
 }
 
 export interface RoomShell {

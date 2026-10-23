@@ -1,8 +1,10 @@
 import type { CatalogEntry } from './catalog';
 import { CATALOG, findCatalogEntry } from './catalog';
 import { clampToRoom, fitToRoom, placeOnWall } from './geometry';
+import { normalizeInventory } from './inventory';
 import { isPhoto, themeOf } from './textures';
 import type { Mount, Outside, Room, RoomItem, Shape, Wall } from './types';
+import { BLOCK_KINDS, type BlockKind } from './world';
 
 export const STORAGE_KEY = 'diseno-habitaciones.v1';
 export const FILE_FORMAT = 'diseno-habitacion';
@@ -50,7 +52,8 @@ export function createRoom(data: NewRoomData): Room {
 
 /**
  * Lo que trae una habitación nueva: una ventana centrada en la pared superior, otra en la pared
- * derecha si mide 3 m o más, y una lámpara de techo en el centro.
+ * derecha si mide 3 m o más, una puerta en la pared inferior (por ahí se sale en el recorrido)
+ * y una lámpara de techo en el centro.
  */
 export function addStarterItems(room: Room): Room {
     const entry = (type: string) => CATALOG.find((e) => e.type === type)!;
@@ -58,6 +61,7 @@ export function addStarterItems(room: Room): Room {
     if (room.length >= 300) {
         items.push(placeOnWall(createItem(entry('ventana'), room), room, 'right', room.length / 2));
     }
+    items.push(placeOnWall(createItem(entry('puerta'), room), room, 'bottom', Math.min(room.width - 60, room.width * 0.75)));
     items.push(createItem(entry('lampara-techo'), room));
     return { ...room, items: [...room.items, ...items] };
 }
@@ -165,6 +169,21 @@ export function normalizeRoom(raw: unknown): Room {
         items: [],
         updatedAt: text(raw.updatedAt, new Date().toISOString()),
     };
+
+    if (isRecord(raw.world)) {
+        const isKey = (k: unknown): k is string => typeof k === 'string' && /^-?\d+,-?\d+,-?\d+$/.test(k);
+        const broken = Array.isArray(raw.world.broken) ? raw.world.broken.filter(isKey) : [];
+        const placed = (Array.isArray(raw.world.placed) ? raw.world.placed : []).filter(
+            (p): p is [string, BlockKind] => Array.isArray(p) && isKey(p[0]) && BLOCK_KINDS.includes(p[1]),
+        );
+        room.world = { broken };
+        if (placed.length) {
+            room.world.placed = placed.map(([k, kind]) => [k, kind]);
+        }
+        if (raw.world.inventory !== undefined) {
+            room.world.inventory = normalizeInventory(raw.world.inventory, (item) => normalizeItem(item, room));
+        }
+    }
 
     if (!room.width || !room.length || !room.height) {
         throw new Error('La habitación no tiene ancho, largo y alto válidos.');

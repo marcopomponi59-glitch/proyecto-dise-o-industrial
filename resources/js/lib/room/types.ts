@@ -7,6 +7,9 @@
  * el frente del objeto mira hacia +y.
  */
 
+import type { Slot } from './inventory';
+import type { BlockKind } from './world';
+
 export type Wall = 'top' | 'right' | 'bottom' | 'left';
 
 export type Outside = 'atardecer' | 'bloques' | 'cielo';
@@ -45,6 +48,12 @@ export interface RoomItem {
     texture?: string;
 }
 
+export interface RoomWorld {
+    broken: string[];
+    placed?: [string, BlockKind][];
+    inventory?: Slot[];
+}
+
 export interface Room {
     id: string;
     name: string;
@@ -55,6 +64,11 @@ export interface Room {
     floorColor: string;
     /** Qué se ve por las ventanas: paisaje de bloques al atardecer o de día, o sólo cielo. */
     outside?: Outside;
+    /**
+     * Lo que cambió en el recorrido: bloques rotos y puestos (claves `ix,iy,iz`) y el inventario.
+     * Sin esto, el mundo es el generado y el inventario arranca sólo con el pico.
+     */
+    world?: RoomWorld;
     items: RoomItem[];
     updatedAt: string;
 }

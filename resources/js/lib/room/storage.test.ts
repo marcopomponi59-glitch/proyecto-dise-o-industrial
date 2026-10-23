@@ -47,11 +47,12 @@ describe('aberturas y techo', () => {
 });
 
 describe('addStarterItems', () => {
-    it('agrega dos ventanas y una lámpara de techo', () => {
+    it('agrega dos ventanas, una puerta y una lámpara de techo', () => {
         const room = addStarterItems(createRoom(base));
         expect(room.items.map((i) => [i.type, i.wall ?? i.mount])).toEqual([
             ['ventana', 'top'],
             ['ventana', 'right'],
+            ['puerta', 'bottom'],
             ['lampara-techo', 'ceiling'],
         ]);
         expect(room.items[1]).toMatchObject({ x: 405, y: 175, rotation: 90 });
@@ -60,6 +61,22 @@ describe('addStarterItems', () => {
     it('en una habitación angosta pone una sola ventana', () => {
         const room = addStarterItems(createRoom({ ...base, length: 250 }));
         expect(room.items.filter((i) => i.type === 'ventana')).toHaveLength(1);
+    });
+});
+
+describe('bloques rotos', () => {
+    it('se guardan con la habitación y descarta claves inválidas', () => {
+        const room = {
+            ...createRoom(base),
+            world: {
+                broken: ['3,0,-2', 'basura', '-1,2,5'],
+                placed: [
+                    ['1,1,1', 'log'],
+                    ['2,1,1', 'oro'],
+                ] as [string, never][],
+            },
+        };
+        expect(parseRoomFile(exportRoom(room)).world).toEqual({ broken: ['3,0,-2', '-1,2,5'], placed: [['1,1,1', 'log']] });
     });
 });
 
